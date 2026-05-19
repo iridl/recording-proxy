@@ -13,17 +13,14 @@ from urllib.parse import urlparse
 import urllib.request
 
 
-HERE = Path(__file__).absolute().parent
-DATA_DIR = HERE.parent / 'data' / 'responses'
-
 @contextlib.contextmanager
-def recording_proxy(is_record, prefixes=()):
+def recording_proxy(dirname, is_record, prefixes=()):
     port = 8080
     cmd = [
         "python",
-        HERE / "recording_proxy.py",
+        __file__,
         "--port", str(port),
-        "--dir", DATA_DIR
+        "--dir", dirname
     ]
     if is_record:
         cmd += ["--record"]
