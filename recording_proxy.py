@@ -55,19 +55,20 @@ def recording_proxy(dirname, is_record, prefixes=()):
     previous_https_proxy = os.environ.get("https_proxy")
     os.environ["https_proxy"] = f"http://127.0.0.1:{port}"
 
-    yield
+    try:
+        yield
+    finally:
+        proxy_proc.terminate()
+        proxy_proc.wait()
 
-    proxy_proc.terminate()
-    proxy_proc.wait()
-
-    if previous_http_proxy is None:
-        del os.environ["http_proxy"]
-    else:
-        os.environ["http_proxy"] = previous_http_proxy
-    if previous_https_proxy is None:
-        del os.environ["https_proxy"]
-    else:
-        os.environ["https_proxy"] = previous_https_proxy
+        if previous_http_proxy is None:
+            del os.environ["http_proxy"]
+        else:
+            os.environ["http_proxy"] = previous_http_proxy
+        if previous_https_proxy is None:
+            del os.environ["https_proxy"]
+        else:
+            os.environ["https_proxy"] = previous_https_proxy
 
 
 class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
