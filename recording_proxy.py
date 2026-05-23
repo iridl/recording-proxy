@@ -4,17 +4,23 @@ import functools
 import hashlib
 import http.server
 import multiprocessing
+from multiprocessing.sharedctypes import Synchronized
 import os
 from pathlib import Path
 import re
-import socket
 import time
+from typing import Any, Iterable, Sequence
 from urllib.parse import urlparse
 import urllib.request
 
 
 @contextlib.contextmanager
-def recording_proxy(dirname, is_record, prefixes=(), verbose=False):
+def recording_proxy(
+        dirname: str,
+        is_record: bool,
+        prefixes: Sequence[str] = (),
+        verbose: bool = False
+):
     backchannel = multiprocessing.Value('i', 0)
     proxy_proc = multiprocessing.Process(
         target=run_proxy,
@@ -52,13 +58,14 @@ def recording_proxy(dirname, is_record, prefixes=(), verbose=False):
 class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
     def __init__(
             self,
-            request,
-            client_address,
-            server,
+            # These first three just get passed through to super
+            request: Any,
+            client_address: Any,
+            server: Any,
             dirname: str,
             is_record: bool,
-            prefixes,
-            verbose,
+            prefixes: Iterable[str],
+            verbose: bool,
     ):
         self.dirname = Path(dirname)
         self.is_record = is_record
@@ -80,7 +87,7 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
         if is_proxy:
             fingerprint = hashlib.md5(url.encode()).hexdigest()
             parsed_url = urlparse(url)
-            def sanitize(s):
+            def sanitize(s: str):
                 return re.sub(r'[^a-zA-Z0-9.-]', '_', s)
             subdir = sanitize(parsed_url.netloc)
             slug = sanitize(parsed_url.path[:100])
@@ -95,9 +102,9 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
         else:
             self._pass_through(url)
 
-    def log_message(self, *args):
+    def log_message(self, format: str, *args):
         if self.verbose:
-            super().log_message(*args)
+            super().log_message(format, *args)
 
     def _serve_from_disk(self, path: Path, url: str) -> None:
         with path.open('rb') as f:
@@ -131,7 +138,14 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(502, f"Upstream Error: {e}")
 
 
-def run_proxy(dirname, is_record, requested_port, prefixes, verbose, backchannel=None):
+def run_proxy(
+        dirname: str,
+        is_record: bool,
+        requested_port: int,
+        prefixes: Iterable[str],
+        verbose: bool,
+        backchannel: Synchronized[int] | None = None
+):
     server = http.server.HTTPServer(
         ('127.0.0.1', requested_port),
         functools.partial(
