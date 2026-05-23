@@ -3,11 +3,11 @@ import contextlib
 import functools
 import hashlib
 import http.server
+import multiprocessing
 import os
 from pathlib import Path
 import re
 import socket
-import subprocess
 import time
 from urllib.parse import urlparse
 import urllib.request
@@ -15,37 +15,15 @@ import urllib.request
 
 @contextlib.contextmanager
 def recording_proxy(dirname, is_record, prefixes=()):
-    port = 8080
-    cmd = [
-        "python",
-        __file__,
-        "--port", str(port),
-        "--dir", dirname
-    ]
-    if is_record:
-        cmd += ["--record"]
-    for p in prefixes:
-        cmd += ["--prefix", p]
-    proxy_proc = subprocess.Popen(cmd)
+    backchannel = multiprocessing.Value('i', 0)
+    proxy_proc = multiprocessing.Process(
+        target=run_proxy,
+        args=[dirname, is_record, 0, prefixes, backchannel],
+    )
+    proxy_proc.start()
 
-    # Wait for the proxy to start accepting connections
-    for i in range(10):
-        try:
-            sock = None
-            sock = socket.socket()
-            sock.connect(('127.0.0.1', port))
-            break
-        except ConnectionRefusedError:
-            pass
-        finally:
-            if sock is not None:
-                sock.close()
-        time.sleep(.1)
-    else:
-        raise Exception('Failed to connect to proxy')
-
-    if proxy_proc.poll() is not None:
-        raise Exception('recording proxy failed to start')
+    while (port := backchannel.value) == 0:
+        time.sleep(.01)
 
     # Even though the proxy only handles http for now, intercept
     # both http and https so that tests that accidentally use https
@@ -59,7 +37,7 @@ def recording_proxy(dirname, is_record, prefixes=()):
         yield
     finally:
         proxy_proc.terminate()
-        proxy_proc.wait()
+        proxy_proc.join()
 
         if previous_http_proxy is None:
             del os.environ["http_proxy"]
@@ -146,23 +124,35 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self.send_error(502, f"Upstream Error: {e}")
 
+
+def run_proxy(dir_, is_record, requested_port, prefixes, backchannel=None):
+    server = http.server.HTTPServer(
+        ('127.0.0.1', requested_port),
+        functools.partial(
+            RecordingProxyHandler,
+            dir=dir_,
+            is_record=is_record,
+            prefixes=prefixes,
+        )
+    )
+    allocated_port = server.server_address[1]
+    mode = 'recording' if is_record else 'playback'
+    print(f"Recording proxy: {mode} mode on port {allocated_port}")
+    if backchannel is not None:
+        backchannel.value = allocated_port
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Recording HTTP proxy")
     parser.add_argument("--record", action="store_true",
                         help="Make real network requests and save the responses.")
-    parser.add_argument("--port", type=int, default=8080, help="Proxy port (default: 8080)")
+    parser.add_argument("--port", type=int, default=0, help="Proxy port (default: pick a random one)")
     parser.add_argument("--dir", default="responses", help="Directory to store responses")
     parser.add_argument("--prefix", action='append')
     args = parser.parse_args()
-    server = http.server.HTTPServer(
-        ('127.0.0.1', args.port),
-        functools.partial(
-            RecordingProxyHandler,
-            dir=args.dir,
-            is_record=args.record,
-            prefixes=args.prefix,
-        )
-    )
-    mode = 'recording' if args.record else 'playback'
-    print(f"Recording proxy: {mode} mode on port {args.port}")
-    server.serve_forever()
+    run_proxy(args.dir, args.record, args.port, args.prefix)
+
