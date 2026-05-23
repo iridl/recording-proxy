@@ -14,11 +14,11 @@ import urllib.request
 
 
 @contextlib.contextmanager
-def recording_proxy(dirname, is_record, prefixes=()):
+def recording_proxy(dirname, is_record, prefixes=(), verbose=False):
     backchannel = multiprocessing.Value('i', 0)
     proxy_proc = multiprocessing.Process(
         target=run_proxy,
-        args=[dirname, is_record, 0, prefixes, backchannel],
+        args=[dirname, is_record, 0, prefixes, verbose, backchannel],
     )
     proxy_proc.start()
 
@@ -55,13 +55,15 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
             request,
             client_address,
             server,
-            dir: str,
+            dirname: str,
             is_record: bool,
-            prefixes=(),
+            prefixes,
+            verbose,
     ):
-        self.dir = Path(dir)
+        self.dirname = Path(dirname)
         self.is_record = is_record
         self.prefixes = prefixes
+        self.verbose = verbose
         super().__init__(request, client_address, server)
 
     def do_GET(self) -> None:
@@ -82,7 +84,7 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
                 return re.sub(r'[^a-zA-Z0-9.-]', '_', s)
             subdir = sanitize(parsed_url.netloc)
             slug = sanitize(parsed_url.path[:100])
-            file_path = self.dir / subdir / f"{slug}-{fingerprint}"
+            file_path = self.dirname / subdir / f"{slug}-{fingerprint}"
 
             if self.is_record:
                 self._fetch_and_record(url, file_path)
@@ -92,6 +94,10 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404, f"No recorded response found for: {url}")
         else:
             self._pass_through(url)
+
+    def log_message(self, *args):
+        if self.verbose:
+            super().log_message(*args)
 
     def _serve_from_disk(self, path: Path, url: str) -> None:
         with path.open('rb') as f:
@@ -125,19 +131,21 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(502, f"Upstream Error: {e}")
 
 
-def run_proxy(dir_, is_record, requested_port, prefixes, backchannel=None):
+def run_proxy(dirname, is_record, requested_port, prefixes, verbose, backchannel=None):
     server = http.server.HTTPServer(
         ('127.0.0.1', requested_port),
         functools.partial(
             RecordingProxyHandler,
-            dir=dir_,
+            dirname=dirname,
             is_record=is_record,
             prefixes=prefixes,
+            verbose=verbose,
         )
     )
     allocated_port = server.server_address[1]
-    mode = 'recording' if is_record else 'playback'
-    print(f"Recording proxy: {mode} mode on port {allocated_port}")
+    if verbose:
+        mode = 'recording' if is_record else 'playback'
+        print(f"Recording proxy: {mode} mode on port {allocated_port}")
     if backchannel is not None:
         backchannel.value = allocated_port
     try:
@@ -153,6 +161,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=0, help="Proxy port (default: pick a random one)")
     parser.add_argument("--dir", default="responses", help="Directory to store responses")
     parser.add_argument("--prefix", action='append')
+    parser.add_argument("--verbose", action='store_true')
     args = parser.parse_args()
-    run_proxy(args.dir, args.record, args.port, args.prefix)
+    run_proxy(args.dir, args.record, args.port, args.prefix, args.verbose)
 
