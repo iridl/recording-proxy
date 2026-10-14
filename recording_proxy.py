@@ -159,7 +159,7 @@ def run_proxy(
     allocated_port = server.server_address[1]
     if verbose:
         mode = 'recording' if is_record else 'playback'
-        print(f"Recording proxy: {mode} mode on port {allocated_port}")
+        print(f"Recording proxy: {mode} mode on port {allocated_port} with fixture dir {dirname}")
     if backchannel is not None:
         backchannel.value = allocated_port
     try:
