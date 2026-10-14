@@ -144,7 +144,7 @@ def run_proxy(
         requested_port: int,
         prefixes: Iterable[str],
         verbose: bool,
-        backchannel: Synchronized[int] | None = None
+        backchannel: "Synchronized[int] | None" = None
 ):
     server = http.server.HTTPServer(
         ('127.0.0.1', requested_port),
