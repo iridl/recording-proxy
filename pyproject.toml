@@ -1,17 +1,18 @@
 [project]
 name = "recording-proxy"
 version = "0.1.0"
-classifiers = [
-    "Framework :: Pytest",
-]
-#dependencies = ["pytest"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch.build]
-include = ["recording_proxy.py"]
+[dependency-groups]
+dev = [
+    "basedpyright",
+]
 
-[project.entry-points.pytest11]
-recording-proxy = "recording_proxy"
+[tool.basedpyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"

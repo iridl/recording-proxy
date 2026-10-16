@@ -4,14 +4,15 @@ import functools
 import hashlib
 import http.server
 import multiprocessing
-from multiprocessing.sharedctypes import Synchronized
 import os
-from pathlib import Path
 import re
 import time
-from typing import Any, Iterable, Sequence
-from urllib.parse import urlparse
 import urllib.request
+from collections.abc import Generator, Iterable, Sequence
+from multiprocessing.sharedctypes import Synchronized
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
 
 
 @contextlib.contextmanager
@@ -20,7 +21,7 @@ def recording_proxy(
         is_record: bool,
         prefixes: Sequence[str] = (),
         verbose: bool = False
-):
+) -> Generator[None, Any, None]:
     backchannel = multiprocessing.Value('i', 0)
     proxy_proc = multiprocessing.Process(
         target=run_proxy,
@@ -66,7 +67,7 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
             is_record: bool,
             prefixes: Iterable[str],
             verbose: bool,
-    ):
+    ) -> None:
         self.dirname = Path(dirname)
         self.is_record = is_record
         self.prefixes = prefixes
@@ -102,7 +103,7 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
         else:
             self._pass_through(url)
 
-    def log_message(self, format: str, *args):
+    def log_message(self, format: str, *args: Any) -> None:
         if self.verbose:
             super().log_message(format, *args)
 
@@ -120,7 +121,7 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
             self.wfile.write(content)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             self.send_error(502, f"Upstream Error: {e}")
 
 
@@ -134,7 +135,7 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
             self.wfile.write(content)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             self.send_error(502, f"Upstream Error: {e}")
 
 
@@ -145,7 +146,7 @@ def run_proxy(
         prefixes: Iterable[str],
         verbose: bool,
         backchannel: "Synchronized[int] | None" = None
-):
+) -> None:
     server = http.server.HTTPServer(
         ('127.0.0.1', requested_port),
         functools.partial(
