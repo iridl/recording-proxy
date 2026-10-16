@@ -9,6 +9,7 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "basedpyright",
+    "ruff",
 ]
 
 [tool.basedpyright]
