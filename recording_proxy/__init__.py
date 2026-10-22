@@ -1,4 +1,3 @@
-import argparse
 import contextlib
 import functools
 import hashlib
@@ -9,23 +8,30 @@ import re
 import time
 import urllib.request
 from collections.abc import Generator, Iterable, Sequence
+from enum import StrEnum, auto
 from multiprocessing.sharedctypes import Synchronized
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 
+class Mode(StrEnum):
+    record_all = auto()
+    record_new = auto()
+    frozen = auto()
+
+
 @contextlib.contextmanager
 def recording_proxy(
         dirname: str,
-        is_record: bool,
+        mode: Mode,
         prefixes: Sequence[str] = (),
         verbose: bool = False
 ) -> Generator[None, Any, None]:
     backchannel = multiprocessing.Value('i', 0)
     proxy_proc = multiprocessing.Process(
         target=run_proxy,
-        args=[dirname, is_record, 0, prefixes, verbose, backchannel],
+        args=[dirname, mode, 0, prefixes, verbose, backchannel],
     )
     proxy_proc.start()
 
@@ -64,12 +70,12 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
             client_address: Any,
             server: Any,
             dirname: str,
-            is_record: bool,
+            mode: Mode,
             prefixes: Iterable[str],
             verbose: bool,
     ) -> None:
         self.dirname = Path(dirname)
-        self.is_record = is_record
+        self.mode = mode
         self.prefixes = prefixes
         self.verbose = verbose
         super().__init__(request, client_address, server)
@@ -94,12 +100,20 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
             slug = sanitize(parsed_url.path[:100])
             file_path = self.dirname / subdir / f"{slug}-{fingerprint}"
 
-            if self.is_record:
+            if self.mode == Mode.frozen:
+                if file_path.exists():
+                    self._serve_from_disk(file_path, url)
+                else:
+                    self.send_error(404, f"No recorded response found for: {url}")
+            elif self.mode == Mode.record_new:
+                if file_path.exists():
+                    self._serve_from_disk(file_path, url)
+                else:
+                    self._fetch_and_record(url, file_path)
+            elif self.mode == Mode.record_all:
                 self._fetch_and_record(url, file_path)
-            elif file_path.exists():
-                self._serve_from_disk(file_path, url)
             else:
-                self.send_error(404, f"No recorded response found for: {url}")
+                assert False
         else:
             self._pass_through(url)
 
@@ -141,7 +155,7 @@ class RecordingProxyHandler(http.server.BaseHTTPRequestHandler):
 
 def run_proxy(
         dirname: str,
-        is_record: bool,
+        mode: Mode,
         requested_port: int,
         prefixes: Iterable[str],
         verbose: bool,
@@ -152,14 +166,13 @@ def run_proxy(
         functools.partial(
             RecordingProxyHandler,
             dirname=dirname,
-            is_record=is_record,
+            mode=mode,
             prefixes=prefixes,
             verbose=verbose,
         )
     )
     allocated_port = server.server_address[1]
     if verbose:
-        mode = 'recording' if is_record else 'playback'
         print(f"Recording proxy: {mode} mode on port {allocated_port} with fixture dir {dirname}")
     if backchannel is not None:
         backchannel.value = allocated_port
@@ -167,16 +180,3 @@ def run_proxy(
         server.serve_forever()
     except KeyboardInterrupt:
         pass
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Recording HTTP proxy")
-    parser.add_argument("--record", action="store_true",
-                        help="Make real network requests and save the responses.")
-    parser.add_argument("--port", type=int, default=0, help="Proxy port (default: pick a random one)")
-    parser.add_argument("--dir", default="responses", help="Directory to store responses")
-    parser.add_argument("--prefix", action='append')
-    parser.add_argument("--verbose", action='store_true')
-    args = parser.parse_args()
-    run_proxy(args.dir, args.record, args.port, args.prefix, args.verbose)
-
